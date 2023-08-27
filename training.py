@@ -1,10 +1,3 @@
-"""
--*- coding: utf-8 -*-
-@Time : 2023/3/15 18:10
-@Author : wanghai11
-"""
-
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -49,7 +42,6 @@ class Actor(nn.Module):
         x = torch.relu(self.fc1(state))
         x = self.tanh(self.fc2(x))
         return x
-
 
 
 # Define the Critic network
@@ -128,11 +120,21 @@ class TransformerCritic(nn.Module):
 
 # Define the MADDPG agent
 class MADDPGAgent:
-    def __init__(self, state_dim, action_dim, learning_rate=0.01):
+    def __init__(self, state_dim, action_dim, learning_rate=0.001):
         self.actor = Actor(state_dim, action_dim)
         self.critic = Critic(state_dim + action_dim)
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=learning_rate)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=learning_rate)
+
+
+# GFMRL
+class GFMRLAgent:
+    def __init__(self, gru_hidden_dim, gat_output_dim, output_dim, input_dim, num_agents, hidden_dim, nhead, num_layers, learning_rate=0.001):
+        self.actor = PolicyNetwork(gru_hidden_dim, gat_output_dim, output_dim)
+        self.critic = TransformerCritic(input_dim, num_agents, hidden_dim, nhead, num_layers)
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=learning_rate)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=learning_rate)
+
 
 # Define the training process
 def train(agents, environment, n_epochs=1000):
@@ -182,7 +184,9 @@ def train(agents, environment, n_epochs=1000):
 n_agents = 100
 state_dim = 100
 action_dim = 20
-agents = [MADDPGAgent(state_dim, action_dim) for _ in range(n_agents)]
+# gru_hidden_dim, gat_output_dim, output_dim, input_dim, num_agents, hidden_dim, nhead, num_layers =
+# agents = [MADDPGAgent(state_dim, action_dim) for _ in range(n_agents)]
+agents = [GFMRLAgent(gru_hidden_dim, gat_output_dim, output_dim, input_dim, num_agents, hidden_dim, nhead, num_layers) for _ in range(n_agents)]
 environment = MultiAgentEnv(100, 100000)
 
 # Train the agents
