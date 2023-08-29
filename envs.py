@@ -46,36 +46,97 @@ class MultiAgentEnv:
         self.complaint_orders.clear()
         return self.order_states, self.agent_states
 
+    # def step(self, actions):
+    #     rewards = np.zeros(self.num_agents)
+    #     successful_agents = []
+    #
+    #     for i, action in enumerate(actions):
+    #         nearby_orders = self.get_nearby_orders(i)
+    #         if not nearby_orders:
+    #             continue
+    #
+    #         self.agent_prices[i, nearby_orders] = action  # Setting the price
+    #
+    #         for order_idx in nearby_orders:
+    #             successful_agent_for_this_order = np.argmin(self.agent_prices[:, order_idx])
+    #             if successful_agent_for_this_order == i:
+    #                 successful_agents.append(i)
+    #                 reward = self.calculate_reward(i, order_idx)
+    #                 rewards[i] += reward  # Accumulate rewards for multiple nearby orders
+    #
+    #     return rewards
+
+    # def step(self, actions):
+    #     rewards = np.zeros(self.num_agents)
+    #     next_states = np.zeros_like(self.agent_states)
+    #     dones = np.zeros(self.num_agents, dtype=bool)
+    #     successful_agents = []
+    #
+    #     for i, action in enumerate(actions):
+    #         # Determine orders with a distance of less than 2km from the current courier
+    #         order_idxs = self.get_nearby_orders(i)
+    #
+    #         # Pricing for these orders
+    #         for order_idx in order_idxs:
+    #             successful_agent_for_this_order = np.argmin(self.agent_prices[:, order_idx])
+    #             if successful_agent_for_this_order == i:
+    #                 successful_agents.append(i)
+    #                 self.agent_prices[i] = action
+    #                 reward = self.calculate_reward(i, order_idx)
+    #                 rewards[i] += reward
+    #
+    #                 next_state, done = self.update_states(i, order_idx)
+    #                 next_states[i] = next_state
+    #                 dones[i] = done
+    #
+    #     return next_states, rewards, dones
+
     def step(self, actions):
         rewards = np.zeros(self.num_agents)
-        successful_agents = []
+        # Initialize next_states.
+        # Its status is updated only if the agent (courier)
+        # succeeds in acquiring the order (i.e., proposes the lowest price)
+        next_states = np.zeros_like(self.agent_states)
+        # Initialize dones
+        dones = np.zeros(self.num_agents, dtype=bool)
 
         for i, action in enumerate(actions):
             nearby_orders = self.get_nearby_orders(i)
+
             if not nearby_orders:
                 continue
-
-            self.agent_prices[i, nearby_orders] = action  # Setting the price
+            # Setting the price
+            self.agent_prices[i, nearby_orders] = action
 
             for order_idx in nearby_orders:
                 successful_agent_for_this_order = np.argmin(self.agent_prices[:, order_idx])
-                if successful_agent_for_this_order == i:
-                    successful_agents.append(i)
-                    reward = self.calculate_reward(i, order_idx)
-                    rewards[i] += reward  # Accumulate rewards for multiple nearby orders
 
-        return rewards
+                if successful_agent_for_this_order == i:
+                    reward = self.calculate_reward(i, order_idx)
+                    # Accumulate rewards for multiple nearby orders
+                    rewards[i] += reward
+                    # Update the states and check if the agent's task is done
+                    next_states[i], dones[i] = self.update_states(i, order_idx)
+
+        return next_states, rewards, dones
+
+    def update_states(self, agent_idx, order_idx):
+        self.order_states[order_idx] = 1  # Set order to accepted status
+        next_state = np.copy(self.agent_states[agent_idx])
+        next_state[-1] = order_idx  # Setting the agent's current order
+        done = False  # the task is not completed
+        return next_state, done
 
     def get_nearby_orders(self, agent_idx):
         agent_loc = self.agent_states[agent_idx, :2]
         nearby_orders = []
         for i, order in enumerate(self.order_states):
             order_loc = order[:2]
-            if self.is_within_NKM(agent_loc, order_loc):
+            if self.is_within_n_km(agent_loc, order_loc):
                 nearby_orders.append(i)
         return nearby_orders
 
-    def is_within_NKM(self, loc1, loc2):
+    def is_within_n_km(self, loc1, loc2):
         # loc1/loc2: (lat, lon)
         lat1, lon1 = math.radians(loc1[0]), math.radians(loc1[1])
         lat2, lon2 = math.radians(loc2[0]), math.radians(loc2[1])
@@ -95,9 +156,9 @@ class MultiAgentEnv:
         reward = self.alpha * profit + self.beta * completion_rate + self.gamma * customer_satisfaction
         return reward
 
-    def update_states(self, agent_idx, order_idx):
-        self.order_states[order_idx] = 1
-        self.agent_states[agent_idx] = order_idx
+    # def update_states(self, agent_idx, order_idx):
+    #     self.order_states[order_idx] = 1
+    #     self.agent_states[agent_idx] = order_idx
 
     def calculate_profit(self, agent_idx, order_idx):
         if len(self.successful_agents) == 0:
@@ -250,34 +311,11 @@ class CityReal:
                  order_time_dist, order_price_dist,
                  l_max, M, N, n_side, probability=1.0 / 28, real_orders="", onoff_courier_location_mat="",
                  global_flag="global", time_interval=10):
-        """
-        :param mapped_matrix_int: 2D matrix: each position is either -100 or grid id from order in real data.
-        :param order_num_dist: 144 [{node_id1: [mu, std]}, {node_id2: [mu, std]}, ..., {node_idn: [mu, std]}]
-                            node_id1 is node the index in self.nodes
-        :param idle_courier_dist_time: [[mu1, std1], [mu2, std2], ..., [mu144, std144]] mean and variance of idle couriers in
-        the city at each time
-        :param idle_courier_location_mat: 144 x num_valid_grids matrix.
-        :param order_time_dist: [ 0.27380797,..., 0.00205766] The probs of order duration = 1 to 9
-        :param order_price_dist: [[10.17, 3.34],   # mean and std of order's price, order durations = 10 minutes.
-                                   [15.02, 6.90],  # mean and std of order's price, order durations = 20 minutes.
-                                   ...,]
-        :param onoff_courier_location_mat: 144 x 504 x 2: 144 total time steps, num_valid_grids = 504.
-        mean and std of online courier number - offline courier number
-        onoff_courier_location_mat[t] = [[-0.625       2.92350389]  <-- Corresponds to the grid in target_node_ids
-                                        [ 0.09090909  1.46398452]
-                                        [ 0.09090909  2.36596622]
-                                        [-1.2         2.05588586]...]
-        :param M:
-        :param N:
-        :param n_side:
-        :param time_interval:
-        :param l_max: The max-duration of an order
-        :return:
-        """
+
         # City.__init__(self, M, N, n_side, time_interval)
         self.M = M  # row numbers
         self.N = N  # column numbers
-        self.nodes = [Node(i) for i in xrange(M * N)]  # a list of nodes: node id start from 0
+        self.nodes = [Node(i) for i in range(M * N)]  # a list of nodes: node id start from 0
         self.couriers = {}  # courier[courier_id] = courier_instance  , courier_id start from 0
         self.n_couriers = 0  # total idle number of couriers. online and not on service.
         self.n_offline_couriers = 0  # total number of offline couriers.
